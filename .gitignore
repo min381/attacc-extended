@@ -1,0 +1,17 @@
+# Build artifacts
+build/
+ramulator2/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Simulation output and logs
+output.csv
+ramulator.out
+*.trace
+
+# IDE and OS files
+.vscode/
+.idea/
+*.swp

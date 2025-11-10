@@ -91,6 +91,11 @@ $ python main.py --help
     parser.add_argument("--batch", type=int, default=1,
             help="batch size, default = 1")
 ```
+#################################
+$ source ~/.bashrc
+$ conda activate attacc_env
+####################################
+
 
 ### Examples
 ```bash 

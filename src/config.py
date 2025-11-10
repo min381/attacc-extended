@@ -206,16 +206,28 @@ def make_model_config(name, dtype):
     model_table['GPT-175B'] = [96, 12288, 96, 128, 4, 1]
     model_table['GPT-89B'] = [48, 12288, 96, 128, 4, 1]
     model_table['GPT-13B'] = [40, 5120, 40, 128, 4, 1]
+    # 2025.11.10
     model_table['LLAMA-7B'] = [32, 4096, 32, 128, 8 / 3, 1]
     model_table['LLAMA-65B'] = [80, 8192, 64, 128, 8 / 3, 1]
+    model_table['LLAMA2-7B'] = [32, 4096, 32, 128, 8 / 3, 1]
+    model_table['LLAMA2-13B'] = [40, 5120, 40, 128, 8 / 3, 1]
+    model_table['LLAMA2-70B'] = [80, 8192, 64, 128, 8 / 3, 8]   # GQA (num_kv_heads = 8)
+    model_table['LLAMA3-8B'] = [32, 4096, 32, 128, 3.5, 4]      # GQA (num_kv_heads = 4)
+    model_table['LLAMA3-70B'] = [80, 8192, 64, 128, 3.5, 8]     # GQA (num_kv_heads = 8)
+    
     model_table['MT-76B'] = [60, 10240, 40, 128, 4, 1]
     model_table['MT-146B'] = [80, 12288, 80, 128, 4, 1]
     model_table['MT-310B'] = [96, 16384, 128, 128, 4, 1]
     model_table['MT-530B'] = [105, 20480, 128, 160, 4, 1]
     model_table['MT-1008B'] = [128, 25600, 160, 160, 4, 1]
+    
     model_table['OPT-66B'] = [64, 9216, 72, 128, 4, 1]
-
+    
     ndec, hdim, nheads, dhead, ff_scale, gqa_size = model_table[name]
+
+    assert nheads % gqa_size == 0
+    num_kv_heads = nheads // gqa_size
+
     config = {
         'name': name,
         'ndec': ndec,
@@ -223,7 +235,8 @@ def make_model_config(name, dtype):
         'num_heads': nheads,
         'dhead': dhead,
         'ff_scale': ff_scale,
-        'gqa_size': gqa_size,
+        #'gqa_size': gqa_size,
+        'num_kv_heads': num_kv_heads,
         'dtype': dtype
     }
     return config

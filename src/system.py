@@ -10,33 +10,60 @@ OPB_PRINT = False
 
 class System:
 
-    def __init__(self,
-                 gpu_config,
-                 modelinfos=None,
-                 hetero_name: DeviceType = DeviceType.NONE,
-                 hetero_config=None):
+    def __init__(self, gpu_config, modelinfos):
         scaling_factor = SCALING_FACTOR
-        self.hetero_name = hetero_name
-        self.GPU = xPU(DeviceType.GPU, gpu_config, scaling_factor)
-        self.AttDevice = self.GPU
-        if self.hetero_name == DeviceType.PIM:
-            self.AttDevice = PIM(hetero_config, scaling_factor)
-
-        elif self.hetero_name == DeviceType.CPU:
-            self.AttDevice = xPU(DeviceType.CPU, hetero_config, scaling_factor)
-
-        self.devices = {'GPU': self.GPU, 'Acc': self.AttDevice}
-
+        self.hetero_name = DeviceType.NONE # Always start as homogeneous
+    
+        self.devices = {}
+        self.devices['GPU'] = xPU(DeviceType.GPU, gpu_config, scaling_factor)
+        self.devices['Acc'] = self.devices['GPU']
+    
         self.model_set = 0
+        self.model = None
         if modelinfos is not None:
-            self.model = Transformer(modelinfos,
-                                     tensor_parallel=self.GPU.num_xpu)
-            self.model_set = 1
+            self.set_model(modelinfos) # Use the setter for consistency
 
         self.scaling_factor = scaling_factor
 
+    @classmethod
+    def create(cls, args):
+        """A factory to build a fully configured System object from command-line args."""
+    
+        # 1. Determine GPU Type
+        if args.gpu == 'H100':
+            gpu_device = GPUType.H100
+        else: # Default to A100a
+            gpu_device = GPUType.A100a
+
+        # 2. Create all necessary config objects
+        dtype = DataType.W16A16 if args.word == 2 else DataType.W8A8
+        modelinfos = make_model_config(args.model, dtype)
+        gmem_cap = args.gmemcap * 1024 * 1024 * 1024
+        xpu_config = make_xpu_config(gpu_device, num_gpu=args.ngpu, mem_cap=gmem_cap)
+
+        # 3. Create the baseline system object
+        system_instance = cls(xpu_config['GPU'], modelinfos)
+
+        # 4. Apply the specific accelerator configuration
+        if args.system == 'dgx-attacc':
+            if args.pim == "bg":
+                pim_type = PIMType.BG
+            elif args.pim == "buffer":
+                pim_type = PIMType.BUFFER
+            else: # default bank
+                pim_type = PIMType.BA
+            pim_config = make_pim_config(pim_type,
+                                     InterfaceType.NVLINK3,
+                                     power_constraint=args.powerlimit)
+            system_instance.set_accelerator(modelinfos, DeviceType.PIM, pim_config)
+
+        elif args.system == 'dgx-cpu':
+            system_instance.set_accelerator(modelinfos, DeviceType.CPU, xpu_config['CPU'])
+
+        return system_instance
+
     def set_model(self, modelinfos):
-        self.model = Transformer(modelinfos, tensor_parallel=self.GPU.num_xpu)
+        self.model = Transformer(modelinfos, tensor_parallel=self.devices['GPU'].num_xpu)
         self.model_set = 1
 
     def set_accelerator(self, modelinfos, name: DeviceType, config):
@@ -44,7 +71,7 @@ class System:
         if self.hetero_name == DeviceType.PIM:
             ramulator = Ramulator(modelinfos, "ramulator2", "ramulator.out")
             self.devices['Acc'] = PIM(config,
-                                      self.scaling_factor,
+                                                  self.scaling_factor,
                                       ramulator)
 
         elif self.hetero_name == DeviceType.CPU:
@@ -54,10 +81,10 @@ class System:
     # Set all device to GPU
     def set_xpu(self, config):
         self.hetero_name = DeviceType.NONE
-        self.GPU = xPU(DeviceType.GPU, config, self.scaling_factor)
-        self.devices['GPU'] = self.GPU
-        self.devices['Acc'] = self.GPU
-        self.model.tp = self.GPU.num_xpu
+        self.devices['GPU'] = xPU(DeviceType.GPU, config, self.scaling_factor)
+        self.devices['Acc'] = self.devices['GPU']
+        if self.mode:
+            self.model.set_tensor_parallelism(self.devices['GPU'].num_xpu)
 
     def simulate(self,
                  batch_size,
@@ -123,7 +150,7 @@ class System:
                 elif layer.name in ["softmax"]:
                     softmax_time += layer.exec_time
 
-            minimum_ratio = 1 / (self.model.num_heads / self.GPU.num_xpu)
+            minimum_ratio = 1 / (self.model.num_heads / self.devices['GPU'].num_xpu)
             if level == False:
                 #softmax_time = 0
                 attn_time = score_time + context_time + softmax_time

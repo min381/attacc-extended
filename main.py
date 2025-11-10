@@ -135,52 +135,21 @@ def main():
 
     args = parser.parse_args()
 
-    global RAMULATOR
-    if RAMULATOR:
-        print("The Ramulator {}".format(RAMULATOR))
+    system=System.create(args)
 
-    if args.gpu == 'H100':
-        gpu_device = GPUType.H100
-    elif args.gpu == 'A100a':
-        gpu_device = GPUType.A100a
-    else:
-        assert 0
-
+    # Baseline (GPU-only)
     if args.system == 'dgx-attacc':
-        print("{}: ({} x {}), PIM:{}, [Lin, Lout, batch]: {}".format(
+         print("{}: ({} x {}), PIM:{}, [Lin, Lout, batch]: {}".format(
             args.system, args.gpu, args.ngpu, args.pim,
             [args.lin, args.lout, args.batch]))
     else:
-        print("{}: ({} x {}), [Lin, Lout, batch]: {}".format(
+         print("{}: ({} x {}), [Lin, Lout, batch]: {}".format(
             args.system, args.gpu, args.ngpu,
             [args.lin, args.lout, args.batch]))
-    num_gpu = args.ngpu
-    gmem_cap = args.gmemcap * 1024 * 1024 * 1024
+    
     output_path = "output.csv"
     if os.path.exists(output_path):
-        os.system("rm " + output_path)
-
-    # set system
-    dtype = DataType.W16A16 if args.word == 2 else DataType.W8A8
-    modelinfos = make_model_config(args.model, dtype)
-    xpu_config = make_xpu_config(gpu_device, num_gpu=num_gpu, mem_cap=gmem_cap)
-    system = System(xpu_config['GPU'], modelinfos)
-    if args.system in ['dgx-attacc']:
-        if args.pim == "bg":
-            pim_type = PIMType.BG
-        elif args.pim == "buffer":
-            pim_type = PIMType.BUFFER
-        else:
-            pim_type = PIMType.BA
-        pim_config = make_pim_config(pim_type,
-                                     InterfaceType.NVLINK3,
-                                     power_constraint=args.powerlimit)
-        system.set_accelerator(modelinfos, DeviceType.PIM, pim_config)
-
-    elif args.system in ['dgx-cpu']:
-        xpu_config = make_xpu_config(gpu_device)
-        system.set_xpu(xpu_config['GPU'])
-        system.set_accelerator(modelinfos, DeviceType.CPU, xpu_config['CPU'])
+        os.remove(output_path) # Use os.remove instead of os.system
 
     run(system,
         args.batch,

@@ -16,14 +16,13 @@ class Layer:
         self.k = k
         self.numOp = numOp
         self.dtype = dtype
-        self.dbyte = 2
-        if dtype in [DataType.W16A16]:
-            self.dbyte = 2
-        elif dtype in [DataType.W8A8]:
+        if dtype in [DataType.W8A8]:
             self.dbyte = 1
+        elif dtype in [DataType.W16A16]:
+            self.dbyte = 2
         else:
             assert 0, "Only support W16A16, W8A8"
-        self.bound = 'compute'  # 'memory'
+        self.bound = 'compute'  # / 'memory'. Latter set in device.py _exec_time() 
         self.exec_time = 0
         self.energy = 0
 
@@ -58,26 +57,29 @@ class Layer:
             assert 0, "In Function \"get_flops\": Not support layer type"
 
     def get_size(self):
-        in1 = self.numOp * self.m * self.k * self.dbyte
-        in2 = self.numOp * self.n * self.k * self.dbyte
-        out = self.numOp * self.m * self.n * self.dbyte
+        tensor_size = self.numOp * self.m * self.n * self.dbyte
+        if self.type in [LayerType.FC, LayerType.MATMUL]:
+            in1 = self.numOp * self.m * self.k * self.dbyte
+            in2 = self.numOp * self.k * self.n * self.dbyte
+            out = tensor_size
 
-        if self.type in [
-                LayerType.SOFTMAX, LayerType.ACT, LayerType.G2G, LayerType.X2G
-        ]:
-            in1 = self.numOp * self.m * self.n * self.dbyte
-            in2 = 0
-            out = in1
-
+        elif self.type in [LayerType.SOFTMAX, LayerType.ACT, LayerType.G2G, LayerType.X2G]:
+            in1 = tensor_size
             # For SwiGLU and GeGLU
             if 'glu' in self.name:
-                in2 = in1
+                in2 = tensor_size
+            else: 
+                in2 = 0
+            out = tensor_size
 
         elif self.type == LayerType.NORM:
-            in1 = self.numOp * self.m * self.n * self.dbyte
-            in2 = in1
-            out = in1
+            in1 = tensor_size
+            in2 = tensor_size
+            out = tensor_size
 
+        else:
+            raise NotImplementedError(f"get_size not implemented for LayerType: {self.type}")
+        
         return in1, in2, out
 
 
@@ -89,6 +91,7 @@ class Transformer:
         self.name = modelinfos['name']
         self.ndec = modelinfos['ndec']
         self.num_heads = modelinfos['num_heads']
+        self.num_kv_heads = modelinfos['num_kv_heads']
         self.hdim = modelinfos['hdim']
         self.ff_scale = modelinfos['ff_scale']
         self.dtype = modelinfos['dtype']
@@ -100,14 +103,17 @@ class Transformer:
         self.gen_decoder = []
 
         # Summarization
+        q_proj_dim = self.hdim
+        kv_proj_dim = self.num_kv_heads * self.dhead
+        qkv_output_dim = q_proj_dim + 2 * kv_proj_dim
         self.sum_decoder.append(
             Layer('sum', 'qkv', LayerType.FC, True, self.dtype, batch * lin,
-                  3 * int(self.hdim / self.tp), self.hdim, 1))
+                  3 * int(qkv_output_dim / self.tp), self.hdim, 1))
         if (attn_on_hetero):
             # send kv matrices
             self.sum_decoder.append(
                 Layer('sum', 'comm_x2g', LayerType.X2G, False, self.dtype,
-                      batch * lin, 2 * int(self.hdim / self.tp), 1, 1))
+                      batch * lin, int(2 * kv_proj_dim / self.tp), 1, 1))
         self.sum_decoder.append(
             Layer('sum', 'score', LayerType.MATMUL, False, self.dtype, lin,
                   lin, self.dhead,
@@ -168,13 +174,16 @@ class Transformer:
         # Generation
         for stage in range(1, lout, 1):
             decoder = []
+            q_proj_dim = self.hdim
+            kv_proj_dim = self.num_kv_heads * self.dhead
+            qkv_output_dim = q_proj_dim + 2 * kv_proj_dim
             decoder.append(
                 Layer('gen', 'qkv', LayerType.FC, True, self.dtype, batch,
-                      3 * int(self.hdim / self.tp), self.hdim, 1))
+                      int(qkv_output_dim / self.tp), self.hdim, 1))
             if (attn_on_hetero):
                 decoder.append(
                     Layer('gen', 'comm_x2g', LayerType.X2G, False, self.dtype,
-                          batch, 3 * int(self.hdim / self.tp), 1, 1))
+                          batch, int(qkv_output_dim / self.tp), 1, 1))
             decoder.append(
                 Layer('gen', 'score', LayerType.MATMUL, False, self.dtype, 1,
                       lin + stage, self.dhead,
@@ -245,3 +254,8 @@ class Transformer:
                       self.hdim, 1, 1))
 
             self.gen_decoder.append(copy.deepcopy(decoder))
+
+    def set_tensor_parallelism(self, num_gpus):
+        if not isinstance(num_gpus, int) or num_gpus <= 0:
+            raise ValueError("Tensor parallelism degree must be a positive integer")
+        self.tp = num_gpus
