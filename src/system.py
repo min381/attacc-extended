@@ -475,6 +475,8 @@ class System:
         ndec = self.model.ndec
         hdim = self.model.hdim
         nhead = self.model.num_heads
+        dhead = self.model.dhead
+        num_kv_heads = self.model.num_kv_heads
         ff_scale = self.model.ff_scale
         w_byte = 2 if self.model.dtype in [DataType.W16A16, DataType.W16A8
                                           ] else 1
@@ -492,7 +494,9 @@ class System:
         temp_memory = max((hdim + l * nhead) * a_byte, hdim * 2 * a_byte,
                           l * nhead * 2 * a_byte,
                           (ff_scale * hdim + hdim) * a_byte) + l * nhead
-        kv_memory = ndec * 2 * l * (hdim) * a_byte
+        # GQA addition
+        kv_dim_per_layer = num_kv_heads * dhead
+        kv_memory = ndec * 2 * l * kv_dim_per_layer * a_byte
 
         return weight_memory, kv_memory * batch_size, temp_memory * batch_size
 
