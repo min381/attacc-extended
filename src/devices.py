@@ -20,8 +20,7 @@ class xPU:
         self.l1_cache_size = config['L1_CAP_PER_CORE']
         self.l2_cache_size = config['L2_CAP_PER_DEVICE']
         self.max_interface_bandwidth = config['INTERFACE_BW']
-        self.aggregate_memory_capacity = config[
-            'MEM_CAPACITY_PER_DEVICE'] * self.num_xpu
+        self.aggregate_memory_capacity = config['MEM_CAPACITY_PER_DEVICE'] * self.num_xpu
 
         self.max_compute_util = scaling_factor['MAX_COMPUTE_UTIL']
         self.max_memory_util = scaling_factor['MAX_OFF_MEM_BW_UTIL']
@@ -113,9 +112,8 @@ class xPU:
             data = layer.get_size()
             return data, data, data, data
 
-        elif layer.type in [LayerType.FC, LayerType.MATMUL]:
-            l1_tm, l1_tn, l1_tk, l2_tm, l2_tn, l2_tk = self._get_optimal_tile(
-                layer)
+        elif layer.type in [LayerType.FC, LayerType.MATMUL, LayerType.ROUTER]:
+            l1_tm, l1_tn, l1_tk, l2_tm, l2_tn, l2_tk = self._get_optimal_tile(layer)
             reg_tm, reg_tn, reg_tk = 16, 16, 32
 
             off_data = self._get_traffic_for_tile(l2_tm, l2_tn, layer)
@@ -134,9 +132,8 @@ class xPU:
         flops = self.peak_flops * self.max_compute_util
         if self.name == DeviceType.GPU:
             num_threadblock = numOp
-            if layer.type == LayerType.FC:
-                num_threadblock = math.ceil(m / l1_tm) * math.ceil(
-                    n / l1_tn) * numOp
+            if layer.type in  [LayerType.FC, LayerType.ROUTER]:
+                num_threadblock = math.ceil(m / l1_tm) * math.ceil(n / l1_tn) * numOp
 
             tmp = math.ceil(num_threadblock / self.num_core) * self.num_core
             core_utilization = num_threadblock / tmp
@@ -175,11 +172,10 @@ class xPU:
                     sum(off_data) + 6.87) / 1000 / 1000
                 return exec_time, 0, 0, 0
 
-            else:
+            else:                   # includes RC, MATMUL, and ROUTER
                 num_threadblock = numOp
-                if layer.type == LayerType.FC:
-                    num_threadblock = math.ceil(m / l1_tm) * math.ceil(
-                        n / l1_tn) * numOp
+                if layer.type in [LayerType.FC, LayerType.ROUTER]:
+                    num_threadblock = math.ceil(m / l1_tm) * math.ceil(n / l1_tn) * numOp
 
                 tmp = math.ceil(num_threadblock / self.num_core) * self.num_core
                 core_utilization = num_threadblock / tmp

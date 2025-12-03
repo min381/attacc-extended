@@ -9,14 +9,15 @@ class DataType(Enum):
 
 
 class LayerType(Enum):
-    FC = 0
+    FC = 0          # Now modified to support MoE
     MATMUL = 1
     ACT = 2
     SOFTMAX = 3
     NORM = 4
     G2G = 5
     X2G = 6
-
+    
+    ROUTER = 7      # Added for MoE
 
 class DeviceType(Enum):
     NONE = 0

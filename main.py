@@ -125,69 +125,67 @@ def main():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
     ## set system configuration
-    parser.add_argument(
-        "--system",
-        type=str,
-        default="dgx",
-        help="dgx (each GPU has 80GB HBM), \
-              dgx-cpu (In dgx, offloading the attention layer to cpu), \
-              dgx-attacc (dgx + attacc)")
-    parser.add_argument(
-        "--gpu",
-        type=str,
-        default='A100a',
-        help="GPU type (A100a and H100), A100a is A100 with HBM3")
+    parser.add_argument("--system",
+                        type    =   str,
+                        default =   "dgx",
+                        help    =   "dgx (each GPU has 80GB HBM), \
+                        dgx-cpu (In dgx, offloading the attention layer to cpu), \
+                        dgx-attacc (dgx + attacc)")
+    parser.add_argument("--gpu",
+                        type    =   str,
+                        default =   'A100a',
+                        help    =   "GPU type (A100a and H100), A100a is A100 with HBM3")
     parser.add_argument("--ngpu",
-                        type=int,
-                        default=8,
-                        help="number of GPUs in DGX system. default=8")
+                        type    =   int,
+                        default =   8,
+                        help    =   "number of GPUs in DGX system. default=8")
     parser.add_argument("--gmemcap",
-                        type=int,
-                        default=80,
-                        help="memory capacity per GPU (GB). default=80")
+                        type    =   int,
+                        default =   80,
+                        help    =   "memory capacity per GPU (GB). default=80")
 
 
 
     ## set attacc configuration
     parser.add_argument("--pim",
-                        type=str,
-                        default='bank',
-                        help="pim mode. list: bank, bg, buffer")
+                        type    =   str,
+                        default =   'bank',
+                        help    =   "pim mode. list: bank, bg, buffer")
     parser.add_argument("--powerlimit",
-                        action='store_true',
-                        help="power constraint for PIM ")
+                        action  =   'store_true',
+                        help    =   "power constraint for PIM ")
     parser.add_argument("--ffopt",
-                        action='store_true',
-                        help="apply feedforward parallel optimization")
+                        action  =   'store_true',
+                        help    =   "apply feedforward parallel optimization")
     parser.add_argument("--pipeopt",
-                        action='store_true',
-                        help="apply pipeline optimization ")
+                        action  =   'store_true',
+                        help    =   "apply pipeline optimization ")
 
     ## set model and service environment
-    parser.add_argument(
-        "--model",
-        type=str,
-        default='GPT-175B',
-        help="model list: GPT-175B, LLAMA-65B, MT-530B, OPT-66B")
+    parser.add_argument("--model",
+                        type    =   str,
+                        default =   'GPT-175B',
+                        help    =   "model list: GPT-175B, LLAMA-65B, MT-530B, OPT-66B")
     parser.add_argument("--word",
-                        type=int,
-                        default='2',
-                        help="word size (precision): 1(INT8), 2(FP16)")
+                        type    =   int,
+                        default =   '2',
+                        help    =   "word size (precision): 1(INT8), 2(FP16)")
     parser.add_argument("--lin",
-                        type=int,
-                        default=2048,
-                        help="input sequence length")
+                        type    =   int,
+                        default =   2048,
+                        help    =   "input sequence length")
     parser.add_argument("--lout",
-                        type=int,
-                        default=128,
-                        help="number of generated tokens")
-    parser.add_argument(
-        "--batch",
-        type=int,
-        default=1,
-        help=
-        "batch size, default = 1"
-    )
+                        type    =   int,
+                        default =   128,
+                        help    =   "number of generated tokens")
+    parser.add_argument("--batch",
+                        type    =   int,
+                        default =   1,
+                        help    =   "batch size, default = 1")
+    parser.add_argument("--output",
+                        type    =   str,
+                        default =   "output.csv",
+                        help    =   "Path to save the output CSV file.")
 
     args = parser.parse_args()
 
@@ -214,7 +212,7 @@ def main():
         print("!!!      this would fail on real hardware.             !!!")
         print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n")
 
-    output_path = "output.csv"
+    output_path = args.output
     if os.path.exists(output_path):
         os.remove(output_path) # Use os.remove instead of os.system
     
@@ -222,10 +220,10 @@ def main():
         args.batch,
         args.lin,
         args.lout,
-        pipe=args.pipeopt,
-        parallel=args.ffopt,
-        output_file=output_path,
-        power_constraint=args.powerlimit)
+        pipe                =   args.pipeopt,
+        parallel            =   args.ffopt,
+        output_file         =   output_path,
+        power_constraint    =   args.powerlimit)
 
 
 if __name__ == "__main__":

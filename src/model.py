@@ -102,7 +102,7 @@ class Transformer:
         self.sum_decoder = []
         self.gen_decoder = []
 
-        # Summarization
+        # ===== Summarization ====================
         q_proj_dim = self.hdim
         kv_proj_dim = self.num_kv_heads * self.dhead
         qkv_output_dim = q_proj_dim + 2 * kv_proj_dim
@@ -135,43 +135,66 @@ class Transformer:
         self.sum_decoder.append(
             Layer('sum', 'norm1', LayerType.NORM, False, self.dtype, batch * lin,
                   self.hdim, 1, 1))
-        if 'LLAMA' in self.name:
+        # Added for MoE
+        if self.is_moe:
+            # Router
             self.sum_decoder.append(
-                Layer('sum', 'ff1', LayerType.FC, True, self.dtype, batch * lin,
-                      self.ff_scale * int(self.hdim / self.tp), self.hdim, 1))
+                Layer('sum', 'moe_router', LayerType.ROUTER, Treu, self.dtype, batch * lin,
+                    self.num_experts, self.hdim, 1))
+            # Experts
+            intermediate_dim = int(self.ff_scale * self.hdim)
             self.sum_decoder.append(
-                Layer('sum', 'ff2', LayerType.FC, True, self.dtype, batch * lin,
-                      self.ff_scale * int(self.hdim / self.tp), self.hdim, 1))
+                Layer('sum', 'moe_expert_gate', LayerType.FC, True, self.dtype, batch * lin,
+                      int(intermediate_dim / self.tp), self.hdim, self.top_k_experts))
             self.sum_decoder.append(
-                Layer('sum', 'glu', LayerType.ACT, False, self.dtype, batch * lin,
-                      self.ff_scale * int(self.hdim / self.tp), 1, 1))
+                Layer('sum', 'moe_expert_up', LayerType.FC, True, self.dtype, batch * lin,
+                      int(intermediate_dim / self.tp), self.hdim, self.top_k_experts))
             self.sum_decoder.append(
-                Layer('sum', 'ff3', LayerType.FC, True, self.dtype, batch * lin,
-                      self.hdim, self.ff_scale * int(self.hdim / self.tp), 1))
+                Layer('sum', 'moe_expert_down', LayerType.FC, True, self.dtype, batch * lin,
+                      self.hdim, int(intermediate_dim / self.tp), self.top_k_experts))
+            # MoE Communication
+            self.sum_decoder.append(
+                Layer('sum', 'moe_comm', LayerType.G2G, False, self.dtype, batch * lin,
+                      self.hdim, 1, 1))
         else:
-            self.sum_decoder.append(
-                Layer('sum', 'ff1', LayerType.FC, True, self.dtype, batch * lin,
-                      self.ff_scale * int(self.hdim / self.tp), self.hdim, 1))
-            if 'OPT' in self.name:
+            if 'LLAMA' in self.name:
                 self.sum_decoder.append(
-                    Layer('sum', 'relu', LayerType.ACT, False,
-                          self.dtype, batch * lin,
+                    Layer('sum', 'ff1', LayerType.FC, True, self.dtype, batch * lin,
+                          self.ff_scale * int(self.hdim / self.tp), self.hdim, 1))
+                self.sum_decoder.append(
+                    Layer('sum', 'ff2', LayerType.FC, True, self.dtype, batch * lin,
+                          self.ff_scale * int(self.hdim / self.tp), self.hdim, 1))
+                self.sum_decoder.append(
+                    Layer('sum', 'glu', LayerType.ACT, False, self.dtype, batch * lin,
                           self.ff_scale * int(self.hdim / self.tp), 1, 1))
+                self.sum_decoder.append(
+                    Layer('sum', 'ff3', LayerType.FC, True, self.dtype, batch * lin,
+                          self.hdim, self.ff_scale * int(self.hdim / self.tp), 1))
             else:
                 self.sum_decoder.append(
-                    Layer('sum', 'gelu', LayerType.ACT, False,
-                          self.dtype, batch * lin,
-                          self.ff_scale * int(self.hdim / self.tp), 1, 1))
+                    Layer('sum', 'ff1', LayerType.FC, True, self.dtype, batch * lin,
+                          self.ff_scale * int(self.hdim / self.tp), self.hdim, 1))
+                if 'OPT' in self.name:
+                    self.sum_decoder.append(
+                        Layer('sum', 'relu', LayerType.ACT, False,
+                              self.dtype, batch * lin,
+                              self.ff_scale * int(self.hdim / self.tp), 1, 1))
+                else:
+                    self.sum_decoder.append(
+                        Layer('sum', 'gelu', LayerType.ACT, False,
+                              self.dtype, batch * lin,
+                              self.ff_scale * int(self.hdim / self.tp), 1, 1))
+                self.sum_decoder.append(
+                    Layer('sum', 'ff2', LayerType.FC, True, self.dtype, batch * lin,
+                          self.hdim, self.ff_scale * int(self.hdim / self.tp), 1))
             self.sum_decoder.append(
-                Layer('sum', 'ff2', LayerType.FC, True, self.dtype, batch * lin,
-                      self.hdim, self.ff_scale * int(self.hdim / self.tp), 1))
-        self.sum_decoder.append(
-            Layer('sum', 'comm_g2g', LayerType.G2G, False, self.dtype, batch * lin,
-                  self.hdim, 1, 1))
+                Layer('sum', 'comm_g2g', LayerType.G2G, False, self.dtype, batch * lin,
+                    self.hdim, 1, 1))
         self.sum_decoder.append(
             Layer('sum', 'norm2', LayerType.NORM, False, self.dtype, batch * lin,
                   self.hdim, 1, 1))
-        # Generation
+
+        # ===== Generation ====================
         for stage in range(1, lout, 1):
             decoder = []
             q_proj_dim = self.hdim
@@ -210,45 +233,65 @@ class Transformer:
             decoder.append(
                 Layer('gen', 'norm1', LayerType.NORM, False, self.dtype, batch,
                       self.hdim, 1, 1))
-            if 'LLAMA' in self.name:
+            if self.is_moe:
                 decoder.append(
-                    Layer('gen', 'ff1', LayerType.FC, True, self.dtype, batch,
-                          self.ff_scale * int(self.hdim / self.tp), self.hdim,
-                          1))
+                    Layer('gen', 'moe_router', LayerType.ROUTER, True, self.dtype, batch,
+                          self.num_experts, self.hdim, 1))
+
+                intermediate_dim = int(self.ff_scale * self.hdim)
                 decoder.append(
-                    Layer('gen', 'ff2', LayerType.FC, True, self.dtype, batch,
-                          self.ff_scale * int(self.hdim / self.tp), self.hdim,
-                          1))
+                    Layer('gen', 'moe_expert_gate', LayerType.FC, True, self.dtype, batch,
+                          int(intermediate_dim / self.tp), self.hdim, self.top_k_experts))
                 decoder.append(
-                    Layer('gen', 'glu', LayerType.ACT, False, self.dtype, batch,
-                          self.ff_scale * int(self.hdim / self.tp), 1, 1))
+                    Layer('gen', 'moe_expert_up', LayerType.FC, True, self.dtype, batch,
+                          int(intermediate_dim / self.tp), self.hdim, self.top_k_experts))
                 decoder.append(
-                    Layer('gen', 'ff3', LayerType.FC, True, self.dtype,
-                          batch, self.hdim,
-                          self.ff_scale * int(self.hdim / self.tp), 1))
-            else:
+                    Layer('gen', 'moe_expert_down', LayerType.FC, True, self.dtype, batch,
+                          self.hdim, int(intermediate_dim / self.tp), self.top_k_experts))
+
                 decoder.append(
-                    Layer('gen', 'ff1', LayerType.FC, True, self.dtype, batch,
-                          self.ff_scale * int(self.hdim / self.tp), self.hdim,
-                          1))
-                if 'OPT' in self.name:
+                    Layer('gen', 'moe_comm', LayerType.G2G, False, self.dtype, batch,
+                          self.hdim, 1, 1))
+            else: 
+                if 'LLAMA' in self.name:
                     decoder.append(
-                        Layer('gen', 'relu', LayerType.ACT, False,
-                              self.dtype, batch,
+                        Layer('gen', 'ff1', LayerType.FC, True, self.dtype, batch,
+                              self.ff_scale * int(self.hdim / self.tp), self.hdim,
+                              1))
+                    decoder.append(
+                        Layer('gen', 'ff2', LayerType.FC, True, self.dtype, batch,
+                              self.ff_scale * int(self.hdim / self.tp), self.hdim,
+                              1))
+                    decoder.append(
+                        Layer('gen', 'glu', LayerType.ACT, False, self.dtype, batch,
                               self.ff_scale * int(self.hdim / self.tp), 1, 1))
+                    decoder.append(
+                        Layer('gen', 'ff3', LayerType.FC, True, self.dtype,
+                              batch, self.hdim,
+                              self.ff_scale * int(self.hdim / self.tp), 1))
                 else:
                     decoder.append(
-                        Layer('gen', 'gelu', LayerType.ACT, False,
-                              self.dtype, batch,
-                              self.ff_scale * int(self.hdim / self.tp), 1, 1))
-                decoder.append(
-                    Layer('gen', 'ff2', LayerType.FC, True, self.dtype,
-                          batch, self.hdim,
-                          self.ff_scale * int(self.hdim / self.tp), 1))
+                        Layer('gen', 'ff1', LayerType.FC, True, self.dtype, batch,
+                              self.ff_scale * int(self.hdim / self.tp), self.hdim,
+                              1))
+                    if 'OPT' in self.name:
+                        decoder.append(
+                            Layer('gen', 'relu', LayerType.ACT, False,
+                                  self.dtype, batch,
+                                  self.ff_scale * int(self.hdim / self.tp), 1, 1))
+                    else:
+                        decoder.append(
+                            Layer('gen', 'gelu', LayerType.ACT, False,
+                                  self.dtype, batch,
+                                  self.ff_scale * int(self.hdim / self.tp), 1, 1))
+                    decoder.append(
+                        Layer('gen', 'ff2', LayerType.FC, True, self.dtype,
+                              batch, self.hdim,
+                              self.ff_scale * int(self.hdim / self.tp), 1))
 
-            decoder.append(
-                Layer('gen', 'comm_g2g', LayerType.G2G, False, self.dtype, batch,
-                      self.hdim, 1, 1))
+                decoder.append(
+                    Layer('gen', 'comm_g2g', LayerType.G2G, False, self.dtype, batch,
+                          self.hdim, 1, 1))
             decoder.append(
                 Layer('gen', 'norm2', LayerType.NORM, False, self.dtype, batch,
                       self.hdim, 1, 1))

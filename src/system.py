@@ -484,19 +484,50 @@ class System:
                                           ] else 1
         l = lin + lout - 1
 
-        if 'LLAMA' in self.model.name:
-            weight_memory = ndec * hdim * (2 * hdim + 2 * (hdim) +
-                                           3 * ff_scale * hdim) * w_byte
-        else:
-            weight_memory = ndec * hdim * (2 * hdim + 2 * (hdim) +
-                                           2 * ff_scale * hdim) * w_byte
+        if self.model.is_moe:
+            # --- MoE Memory Calculation ---
+            num_experts = self.model.num_experts
 
-        temp_memory = max((hdim + l * nhead) * a_byte, hdim * 2 * a_byte,
-                          l * nhead * 2 * a_byte,
-                          (ff_scale * hdim + hdim) * a_byte) + l * nhead
+            # 1. Non-expert weights (Attention layers, norms, etc.)
+            # This is the size of the "base" model.
+            q_proj_size = hdim * hdim
+            kv_proj_size = hdim * (num_kv_heads * dhead) # K and V projections are smaller
+            o_proj_size = hdim * hdim
+            attention_weights = q_proj_size + 2 * kv_proj_size + o_proj_size
+            
+            # 2. Expert weights (FFN layers)
+            # Calculate the size of ONE expert, then multiply by the number of experts.
+            # Using Mixtral/LLaMA's SwiGLU FFN structure (3 matrices).
+            intermediate_dim = int(hdim * ff_scale)
+            single_expert_weights = (hdim * intermediate_dim) + (hdim * intermediate_dim) + (intermediate_dim * hdim)
+            all_experts_weights = single_expert_weights * num_experts
+            
+            # 3. Router weights
+            router_weights = hdim * num_experts
+
+            # Total weight memory is the sum of all components, scaled by layers and byte size
+            weight_memory = ndec * (attention_weights + all_experts_weights + router_weights) * w_byte
+            
+        else:
+            # --- The original Dense Model Calculation ---
+            # It's an approximation, but we will keep it for consistency.
+            if 'LLAMA' in self.model.name:
+                # Approximation for SwiGLU FFN (3 matrices)
+                weight_memory = ndec * hdim * (hdim + 2*(num_kv_heads*dhead) + hdim +
+                                               3 * ff_scale * hdim) * w_byte
+            else:
+                # Approximation for standard FFN (2 matrices)
+                weight_memory = ndec * hdim * (hdim + 2*(num_kv_heads*dhead) + hdim +
+                                               2 * ff_scale * hdim) * w_byte
+        
         # GQA addition
         kv_dim_per_layer = num_kv_heads * dhead
         kv_memory = ndec * 2 * l * kv_dim_per_layer * a_byte
+
+        
+        temp_memory = max((hdim + l * nhead) * a_byte, hdim * 2 * a_byte,
+                          l * nhead * 2 * a_byte,
+                          (ff_scale * hdim + hdim) * a_byte) + l * nhead
 
         return weight_memory, kv_memory * batch_size, temp_memory * batch_size
 

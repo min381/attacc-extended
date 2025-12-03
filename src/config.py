@@ -222,8 +222,20 @@ def make_model_config(name, dtype):
     model_table['MT-1008B'] = [128, 25600, 160, 160, 4, 1]
     
     model_table['OPT-66B'] = [64, 9216, 72, 128, 4, 1]
+
+    # 2025.12.01
+    model_table['Mixtral-8x7B'] = [32, 4096, 32, 128, 3.5, 8, 8, 2]
+    model_table['Mixtral-8x22B'] = [56, 6144, 48, 128, 8/3, 8, 8, 26]
     
-    ndec, hdim, nheads, dhead, ff_scale, gqa_size = model_table[name]
+    params = model_table[name]
+    is_moe = len(params) == 8
+
+    if is_moe:
+        ndec, hdim, nheads, dhead, ff_scale, gqa_size, num_experts, top_k_experts  = params
+    else:
+        ndec, hdim, nheads, dhead, ff_scale, gqa_size = params
+        num_experts = 0
+        top_k_experts = 0
 
     assert nheads % gqa_size == 0
     num_kv_heads = nheads // gqa_size
@@ -237,6 +249,9 @@ def make_model_config(name, dtype):
         'ff_scale': ff_scale,
         #'gqa_size': gqa_size,
         'num_kv_heads': num_kv_heads,
+        'num_experts': num_experts,
+        'top_k_experts': top_k_experts,
+        'is_moe': is_moe,
         'dtype': dtype
     }
     return config
