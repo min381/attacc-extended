@@ -47,7 +47,7 @@ class Layer:
         elif self.type == LayerType.NORM:
             return 5 * self.m * self.n * self.numOp
 
-        elif self.type in [LayerType.FC, LayerType.MATMUL]:
+        elif self.type in [LayerType.FC, LayerType.MATMUL, LayerType.ROUTER]:
             return 2 * self.m * self.n * self.k * self.numOp
 
         elif self.type in [LayerType.G2G, LayerType.X2G]:
@@ -58,7 +58,7 @@ class Layer:
 
     def get_size(self):
         tensor_size = self.numOp * self.m * self.n * self.dbyte
-        if self.type in [LayerType.FC, LayerType.MATMUL]:
+        if self.type in [LayerType.FC, LayerType.MATMUL, LayerType.ROUTER]:
             in1 = self.numOp * self.m * self.k * self.dbyte
             in2 = self.numOp * self.k * self.n * self.dbyte
             out = tensor_size
@@ -97,6 +97,10 @@ class Transformer:
         self.dtype = modelinfos['dtype']
         self.dhead = int(self.hdim / self.num_heads)
         self.tp = tensor_parallel
+        # Added for MoE
+        self.is_moe = modelinfos['is_moe']
+        self.num_experts = modelinfos['num_experts']
+        self.top_k_experts = modelinfos['top_k_experts']
 
     def build(self, batch, lin, lout, attn_on_hetero=False):
         self.sum_decoder = []
@@ -139,7 +143,7 @@ class Transformer:
         if self.is_moe:
             # Router
             self.sum_decoder.append(
-                Layer('sum', 'moe_router', LayerType.ROUTER, Treu, self.dtype, batch * lin,
+                Layer('sum', 'moe_router', LayerType.ROUTER, True, self.dtype, batch * lin,
                     self.num_experts, self.hdim, 1))
             # Experts
             intermediate_dim = int(self.ff_scale * self.hdim)

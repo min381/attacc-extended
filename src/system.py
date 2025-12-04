@@ -227,8 +227,9 @@ class System:
         s_flops = 0
         g_flops = 0
 
+        # Layer Type Breakdown
         gen_energies = {}
-
+        # Component Breakdown
         unit_energy = {
             'g_all': 0,
             'g_offmem': 0,
@@ -321,7 +322,7 @@ class System:
             }
             for layer in s_decoder:
                 exec_time = layer.exec_time
-                if layer.type == LayerType.FC:
+                if layer.type in [LayerType.FC, LayerType.ROUTER]:
                     s_perf['all'] += exec_time
                     s_perf['fc'] += exec_time
                 elif layer.type == LayerType.MATMUL:
@@ -360,7 +361,7 @@ class System:
                 for l_idx, layer in enumerate(decoder_block):
                     exec_time = layer.exec_time
                     g_perf['all'] += exec_time
-                    if layer.type == LayerType.FC:
+                    if layer.type in [LayerType.FC, LayerType.ROUTER]:
                         g_perf['fc'] += exec_time
                         if 'ff' in layer.name:
                             g_perf['ff'] += exec_time
@@ -387,19 +388,27 @@ class System:
 
             g_perf = {k: v / (lout - 1) for k, v in g_perf.items()}
 
+            # Robust Aggregation code (That doesn't crash even if a particular layer type was not present in the simulation)
+            act_energy = gen_energies.get(LayerType.ACT, {'mem': 0, 'comp': 0})
+            norm_energy = gen_energies.get(LayerType.NORM, {'mem': 0, 'comp': 0})
+            fc_energy = gen_energies.get(LayerType.FC, {'mem': 0, 'comp': 0})
+            matmul_energy = gen_energies.get(LayerType.MATMUL, {'mem': 0, 'comp': 0})
+            softmax_energy = gen_energies.get(LayerType.SOFTMAX, {'mem': 0, 'comp': 0})
+
             energies = [
-                unit_energy['g_all'], unit_energy['g_offmem'],
-                unit_energy['g_l2'], unit_energy['g_l1'], unit_energy['g_reg'],
-                unit_energy['g_alu'], gen_energies[LayerType.FC]['mem'],
-                gen_energies[LayerType.FC]['comp'],
-                gen_energies[LayerType.MATMUL]['mem'] +
-                gen_energies[LayerType.SOFTMAX]['mem'],
-                gen_energies[LayerType.MATMUL]['comp'] +
-                gen_energies[LayerType.SOFTMAX]['comp'],
-                gen_energies[LayerType.ACT]['mem'] +
-                gen_energies[LayerType.NORM]['mem'],
-                gen_energies[LayerType.ACT]['comp'] +
-                gen_energies[LayerType.NORM]['comp']
+                unit_energy['g_all'], 
+                unit_energy['g_offmem'],
+                unit_energy['g_l2'], 
+                unit_energy['g_l1'], 
+                unit_energy['g_reg'],
+                unit_energy['g_alu'], 
+                # From gen_energy
+                fc_energy['mem'],                               # FC
+                fc_energy['comp'],                              # FC
+                matmul_energy['mem'] + softmax_energy['mem'],   # Attention
+                matmul_energy['comp'] + softmax_energy['comp'], # Attention
+                act_energy['mem'] + norm_energy['mem'],         # Other
+                act_energy['comp'] + norm_energy['comp']        # Other
             ]
             comm_energy = sum([v['comm'] for k, v in gen_energies.items()])
             energies.append(comm_energy)
